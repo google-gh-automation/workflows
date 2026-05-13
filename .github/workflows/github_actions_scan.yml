@@ -1,0 +1,115 @@
+name: 'GitHub Actions Scan'
+
+on:
+  workflow_call:
+    inputs:
+      wif_provider:
+        type: 'string'
+      zizmor_result_bucket:
+        type: 'string'
+  pull_request:
+    paths:
+      - '.github/workflows/*.yml'
+      - '.github/workflows/*.yaml'
+
+permissions:
+  contents: 'read'
+  id-token: 'write'
+
+env:
+  WIF_PROVIDER: 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
+
+jobs:
+  zizmor-scan:
+    runs-on: 'ubuntu-latest'
+    if: >-
+      inputs.wif_provider != '' ||
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
+    env:
+      ZIZMOR_VERSION: '1.24.1'
+      ZIZMOR_DOCKER_DIGEST: 'sha256:128ebbe369a95f9d4427737e794537256095b55f779a247aebc960dc4ea1f7b3'
+      ZIZMOR_ENFORCE: 'false'
+      ZIZMOR_RESULT_BUCKET: 'zizmor-7165'
+    steps:
+      - name: 'Checkout source'
+        uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: 'Authenticate to GCP'
+        uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
+        with:
+          workload_identity_provider: >-
+            ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
+      - name: 'Install zizmor'
+        shell: 'bash'
+        run: 'docker pull "ghcr.io/zizmorcore/zizmor:${{ env.ZIZMOR_VERSION }}@${{ env.ZIZMOR_DOCKER_DIGEST }}"'
+      - name: 'Run zizmor'
+        shell: 'bash'
+        run: >-
+          docker run
+          --rm
+          --volume "${GITHUB_WORKSPACE}:/workspace:ro"
+          --workdir "/workspace"
+          "ghcr.io/zizmorcore/zizmor:${{ env.ZIZMOR_VERSION }}@${{ env.ZIZMOR_DOCKER_DIGEST }}"
+          --format sarif
+          --
+          .github/workflows
+          > zizmor.sarif.json
+      - name: 'Enrich SARIF with GitHub metadata'
+        shell: 'bash'
+        run: >-
+          jq
+          --arg uri "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          --arg sha "${GITHUB_SHA}"
+          --argjson repo_id "${GITHUB_REPOSITORY_ID}"
+          --argjson owner_id "${GITHUB_REPOSITORY_OWNER_ID}"
+          --arg run_id "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+          '.runs[] |= . + {
+            "versionControlProvenance": [
+              {
+                "repositoryUri": $uri,
+                "revisionId": $sha,
+                "properties": {
+                  "github_repository_id": $repo_id,
+                  "github_owner_id": $owner_id
+                }
+              }
+            ],
+            "invocations": [
+              {
+                "executionId": $run_id,
+                "executionSuccessful": true
+              }
+            ]
+          }' zizmor.sarif.json > enriched.sarif.json
+      - name: 'Upload result'
+        shell: 'bash'
+        env:
+          GITHUB_PULL_REQUEST_NUMBER: '${{ github.event.pull_request.number }}'
+          ZIZMOR_RESULT_BUCKET: >-
+            ${{ inputs.zizmor_result_bucket != '' && inputs.zizmor_result_bucket || env.ZIZMOR_RESULT_BUCKET }}
+        run: >-
+          gcloud storage cp
+          enriched.sarif.json
+          "gs://${ZIZMOR_RESULT_BUCKET}/${GITHUB_REPOSITORY}/${GITHUB_PULL_REQUEST_NUMBER}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.sarif.json"
+      - name: 'Check for high severity findings'
+        id: 'check-findings-severity'
+        shell: 'bash'
+        run: |
+          result=$(jq 'any(.runs[].results[]?; .properties["zizmor/severity"] == "High")' zizmor.sarif.json)
+          echo "has_high=$result" >> "$GITHUB_OUTPUT"
+      - name: 'Re-run zizmor with github format'
+        if: >-
+          steps.check-findings-severity.outputs.has_high == 'true'
+          &&
+          env.ZIZMOR_ENFORCE == 'true'
+        shell: 'bash'
+        run: >-
+          docker run
+          --rm
+          --volume "${GITHUB_WORKSPACE}:/workspace:ro"
+          --workdir "/workspace"
+          "ghcr.io/zizmorcore/zizmor:${{ env.ZIZMOR_VERSION }}@${{ env.ZIZMOR_DOCKER_DIGEST }}"
+          --format github
+          --
+          .github/workflows
