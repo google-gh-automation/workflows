@@ -77,8 +77,10 @@ jobs:
             ],
             "invocations": [
               {
-                "executionId": $run_id,
-                "executionSuccessful": true
+                "executionSuccessful": true,
+                "properties": {
+                  "execution_id": $run_id
+                }
               }
             ]
           }' zizmor.sarif.json > enriched.sarif.json
