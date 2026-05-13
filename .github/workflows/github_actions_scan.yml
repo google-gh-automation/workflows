@@ -24,7 +24,7 @@ jobs:
     runs-on: 'ubuntu-latest'
     if: >-
       inputs.wif_provider != '' ||
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository)
+      (github.event_name == 'pull_request' && !startsWith(github.workflow_ref, format('{0}/', github.repository)))
     env:
       ZIZMOR_VERSION: '1.24.1'
       ZIZMOR_DOCKER_DIGEST: 'sha256:128ebbe369a95f9d4427737e794537256095b55f779a247aebc960dc4ea1f7b3'
