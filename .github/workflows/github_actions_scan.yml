@@ -7,11 +7,15 @@ on:
         type: 'string'
       zizmor_result_bucket:
         type: 'string'
-  pull_request:
+  pull_request_target:
 
 permissions: {}
 
 env:
+  ZIZMOR_VERSION: '1.24.1'
+  ZIZMOR_DOCKER_DIGEST: 'sha256:128ebbe369a95f9d4427737e794537256095b55f779a247aebc960dc4ea1f7b3'
+  ZIZMOR_ENFORCE: 'false'
+  ZIZMOR_RESULT_BUCKET: 'zizmor-7165'
   WIF_PROVIDER: 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
 
 jobs:
@@ -25,6 +29,7 @@ jobs:
       - name: 'Checkout source'
         uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
         with:
+          ref: '${{ github.event.pull_request.head.sha }}'
           fetch-depth: 0
           persist-credentials: false
       - name: 'Check for workflow changes'
@@ -50,34 +55,27 @@ jobs:
         github.event_name == 'pull_request' &&
         !startsWith(github.workflow_ref, format('{0}/', github.repository))
       )
-    env:
-      ZIZMOR_VERSION: '1.24.1'
-      ZIZMOR_DOCKER_DIGEST: 'sha256:128ebbe369a95f9d4427737e794537256095b55f779a247aebc960dc4ea1f7b3'
-      ZIZMOR_ENFORCE: 'false'
-      ZIZMOR_RESULT_BUCKET: 'zizmor-7165'
     permissions:
       contents: 'read'
-      id-token: 'write'
+    outputs:
+      has-high-severity: '${{ steps.check-findings-severity.outputs.has-high-severity }}'
+      zizmor-enforce: '${{ steps.check-findings-severity.outputs.zizmor-enforce }}'
     steps:
       - name: 'Checkout source'
         uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
         with:
+          ref: '${{ github.event.pull_request.head.sha }}'
           persist-credentials: false
-      - name: 'Authenticate to GCP'
-        uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
-        with:
-          workload_identity_provider: >-
-            ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
-      - name: 'Install zizmor'
-        shell: 'bash'
-        run: 'docker pull "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"'
       - name: 'Run zizmor'
         shell: 'bash'
+        env:
+          GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
         run: >-
           docker run
           --rm
           --volume "${GITHUB_WORKSPACE}:/workspace:ro"
           --workdir "/workspace"
+          --env GH_TOKEN="${GH_TOKEN}"
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format sarif
           --
@@ -112,6 +110,37 @@ jobs:
               }
             ]
           }' zizmor.sarif.json > enriched.sarif.json
+      - name: 'Save result'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        with:
+          name: 'zizmor'
+          path: 'enriched.sarif.json'
+          if-no-files-found: 'error'
+          retention-days: 1
+      - name: 'Check for high severity findings'
+        id: 'check-findings-severity'
+        shell: 'bash'
+        run: |
+          result=$(jq 'any(.runs[].results[]?; .properties["zizmor/severity"] == "High")' zizmor.sarif.json)
+          echo "has-high-severity=$result" >> "$GITHUB_OUTPUT"
+          echo "zizmor-enforce=${ZIZMOR_ENFORCE}" >> "$GITHUB_OUTPUT"
+
+  zizmor-upload:
+    needs: ['zizmor-scan']
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    steps:
+      - name: 'Retrieve result'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
+        with:
+          name: 'zizmor'
+      - name: 'Authenticate to GCP'
+        uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
+        with:
+          workload_identity_provider: >-
+            ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
       - name: 'Upload result'
         shell: 'bash'
         env:
@@ -122,23 +151,31 @@ jobs:
           gcloud storage cp
           enriched.sarif.json
           "gs://${ZIZMOR_RESULT_BUCKET}/${GITHUB_REPOSITORY}/${GITHUB_PULL_REQUEST_NUMBER}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.sarif.json"
-      - name: 'Check for high severity findings'
-        id: 'check-findings-severity'
-        shell: 'bash'
-        run: |
-          result=$(jq 'any(.runs[].results[]?; .properties["zizmor/severity"] == "High")' zizmor.sarif.json)
-          echo "has_high=$result" >> "$GITHUB_OUTPUT"
+
+  zizmor-output:
+    needs: ['zizmor-scan']
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: 'read'
+    if: >-
+      needs.zizmor-scan.outputs.zizmor-enforce == 'true' &&
+      needs.zizmor-scan.outputs.has-high-severity == 'true'
+    steps:
+      - name: 'Checkout source'
+        uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
+        with:
+          ref: '${{ github.event.pull_request.head.sha }}'
+          persist-credentials: false
       - name: 'Re-run zizmor with github format'
-        if: >-
-          steps.check-findings-severity.outputs.has_high == 'true'
-          &&
-          env.ZIZMOR_ENFORCE == 'true'
         shell: 'bash'
+        env:
+          GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
         run: >-
           docker run
           --rm
           --volume "${GITHUB_WORKSPACE}:/workspace:ro"
           --workdir "/workspace"
+          --env GH_TOKEN="${GH_TOKEN}"
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format github
           --
