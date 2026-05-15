@@ -52,7 +52,7 @@ jobs:
       inputs.wif_provider != '' ||
       (
         needs.check-changes.outputs.changed == 'true' &&
-        github.event_name == 'pull_request' &&
+        github.event_name == 'pull_request_target' &&
         !startsWith(github.workflow_ref, format('{0}/', github.repository))
       )
     permissions:
