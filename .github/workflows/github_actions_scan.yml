@@ -22,7 +22,7 @@ jobs:
   check-changes:
     runs-on: 'ubuntu-latest'
     outputs:
-      changed: '${{ steps.check.outputs.changed }}'
+      files: '${{ steps.check.outputs.files }}'
     permissions:
       contents: 'read'
     steps:
@@ -39,11 +39,8 @@ jobs:
           GIT_HEAD_SHA: '${{ github.event.pull_request.head.sha }}'
           GIT_BASE_SHA: '${{ github.event.pull_request.base.sha }}'
         run: |
-          changed="false"
-          if git diff --name-only "${GIT_BASE_SHA}" "${GIT_HEAD_SHA}" | grep -E '^\.github/workflows/.+\.ya?ml$' > /dev/null; then
-            changed="true"
-          fi
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          files=$(git diff --name-only "${GIT_BASE_SHA}" "${GIT_HEAD_SHA}" | grep -E '^\.github/workflows/.+\.ya?ml$' | xargs || true)
+          echo "files=$files" >> "$GITHUB_OUTPUT"
 
   zizmor-scan:
     needs: ['check-changes']
@@ -51,7 +48,7 @@ jobs:
     if: >-
       inputs.wif_provider != '' ||
       (
-        needs.check-changes.outputs.changed == 'true' &&
+        needs.check-changes.outputs.files != '' &&
         github.event_name == 'pull_request_target' &&
         !startsWith(github.workflow_ref, format('{0}/', github.repository))
       )
@@ -70,6 +67,7 @@ jobs:
         shell: 'bash'
         env:
           GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          CHANGED_FILES: '${{ needs.check-changes.outputs.files }}'
         run: >-
           docker run
           --rm
@@ -80,7 +78,7 @@ jobs:
           --format sarif
           --no-ignores
           --
-          .github/workflows
+          ${CHANGED_FILES}
           > zizmor.sarif.json
       - name: 'Enrich SARIF with GitHub metadata'
         shell: 'bash'
@@ -171,6 +169,7 @@ jobs:
         shell: 'bash'
         env:
           GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          CHANGED_FILES: '${{ needs.check-changes.outputs.files }}'
         run: >-
           docker run
           --rm
@@ -180,4 +179,4 @@ jobs:
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format github
           --
-          .github/workflows
+          ${CHANGED_FILES}
