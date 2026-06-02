@@ -179,6 +179,5 @@ jobs:
           --env GH_TOKEN="${GH_TOKEN}"
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format github
-          --no-ignores
           --
           .github/workflows
