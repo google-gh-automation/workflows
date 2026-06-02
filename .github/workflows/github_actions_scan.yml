@@ -12,8 +12,8 @@ on:
 permissions: {}
 
 env:
-  ZIZMOR_VERSION: '1.24.1'
-  ZIZMOR_DOCKER_DIGEST: 'sha256:128ebbe369a95f9d4427737e794537256095b55f779a247aebc960dc4ea1f7b3'
+  ZIZMOR_VERSION: '1.25.2'
+  ZIZMOR_DOCKER_DIGEST: 'sha256:14ea7f5cc7c67933394a35b5a38a277397818d232602635edb2010b313afb110'
   ZIZMOR_ENFORCE: 'false'
   ZIZMOR_RESULT_BUCKET: 'zizmor-7165'
   WIF_PROVIDER: 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
@@ -78,6 +78,7 @@ jobs:
           --env GH_TOKEN="${GH_TOKEN}"
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format sarif
+          --no-ignores
           --
           .github/workflows
           > zizmor.sarif.json
