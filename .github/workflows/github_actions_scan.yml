@@ -46,11 +46,13 @@ jobs:
     needs: ['check-changes']
     runs-on: 'ubuntu-latest'
     if: >-
-      inputs.wif_provider != '' ||
+      needs.check-changes.outputs.files != '' &&
       (
-        needs.check-changes.outputs.files != '' &&
-        github.event_name == 'pull_request_target' &&
-        !startsWith(github.workflow_ref, format('{0}/', github.repository))
+        inputs.wif_provider != '' ||
+        (
+          github.event_name == 'pull_request_target' &&
+          !startsWith(github.workflow_ref, format('{0}/', github.repository))
+        )
       )
     permissions:
       contents: 'read'
