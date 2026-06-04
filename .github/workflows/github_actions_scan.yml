@@ -182,3 +182,40 @@ jobs:
           --format github
           --
           ${CHANGED_FILES}
+      - name: 'Retrieve SARIF result'
+        uses: 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' # ratchet:actions/download-artifact@v8
+        with:
+          name: 'zizmor'
+      - name: 'Analyze SARIF for required checks'
+        shell: 'bash'
+        run: |
+          REQUIRED_CHECKS=(
+            "bot-conditions"
+            "insecure-commands"
+            "known-vulnerable-actions"
+            "template-injection"
+            "unpinned-uses"
+            "unredacted-secrets"
+            "unsound-condition"
+          )
+          
+          echo "Analyzing SARIF output for required checks: ${REQUIRED_CHECKS[*]}"
+          
+          CHECKS_JSON=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" | jq -R . | jq -s .)
+          
+          HAS_FINDINGS=$(jq -r --argjson checks "$CHECKS_JSON" '
+            [.runs[]?.results[]? | select(.ruleId | split("/") | last as $rule | $checks | index($rule))] | length > 0
+          ' enriched.sarif.json)
+          
+          if [ "$HAS_FINDINGS" = "true" ]; then
+            echo "::error::Found findings for required checks that must always succeed."
+            
+            jq -r --argjson checks "$CHECKS_JSON" '
+              .runs[]?.results[]? 
+              | select(.ruleId | split("/") | last as $rule | $checks | index($rule))
+              | "::error file=\(.locations[0].logicalLocations[0]?.properties?.symbolic?.key?.Local?.given_path // .locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine),title=\(.ruleId)::\(.message.text)"
+            ' enriched.sarif.json
+            exit 1
+          else
+            echo "All required checks succeeded."
+          fi
