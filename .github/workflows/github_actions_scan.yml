@@ -7,6 +7,8 @@ on:
         type: 'string'
       zizmor_result_bucket:
         type: 'string'
+      zizmor_enforce:
+        type: 'string'
   pull_request_target:
 
 permissions: {}
@@ -14,7 +16,8 @@ permissions: {}
 env:
   ZIZMOR_VERSION: '1.25.2'
   ZIZMOR_DOCKER_DIGEST: 'sha256:14ea7f5cc7c67933394a35b5a38a277397818d232602635edb2010b313afb110'
-  ZIZMOR_ENFORCE: 'false'
+  ZIZMOR_ENFORCE: >-
+    ${{ inputs.wif_provider != '' && inputs.wif_provider || 'false' }}
   ZIZMOR_RESULT_BUCKET: 'zizmor-7165'
   WIF_PROVIDER: 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
 
@@ -75,12 +78,12 @@ jobs:
           --rm
           --volume "${GITHUB_WORKSPACE}:/workspace:ro"
           --workdir "/workspace"
-          --env GH_TOKEN="${GH_TOKEN}"
+          --env "GH_TOKEN=${GH_TOKEN}"
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format sarif
           --no-ignores
           --
-          ${CHANGED_FILES}
+          "${CHANGED_FILES}"
           > zizmor.sarif.json
       - name: 'Enrich SARIF with GitHub metadata'
         shell: 'bash'
@@ -154,7 +157,7 @@ jobs:
           "gs://${ZIZMOR_RESULT_BUCKET}/${GITHUB_REPOSITORY}/${GITHUB_PULL_REQUEST_NUMBER}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.sarif.json"
 
   zizmor-output:
-    needs: ['zizmor-scan']
+    needs: ['zizmor-scan', 'check-changes']
     runs-on: 'ubuntu-latest'
     permissions:
       contents: 'read'
@@ -177,11 +180,11 @@ jobs:
           --rm
           --volume "${GITHUB_WORKSPACE}:/workspace:ro"
           --workdir "/workspace"
-          --env GH_TOKEN="${GH_TOKEN}"
+          --env "GH_TOKEN=${GH_TOKEN}"
           "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
           --format github
           --
-          ${CHANGED_FILES}
+          "${CHANGED_FILES}"
       - name: 'Retrieve SARIF result'
         uses: 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' # ratchet:actions/download-artifact@v8
         with:
