@@ -1,0 +1,32 @@
+name: 'Action Lint'
+
+on:
+  pull_request:
+
+permissions: {}
+
+env:
+  ACTIONLINT_VERSION: '1.7.12'
+  ACTIONLINT_SHA256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8'
+
+jobs:
+  actionlint:
+    runs-on: 'ubuntu-latest'
+    permissions:
+      contents: 'read'
+    steps:
+      - name: 'Checkout source'
+        uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: 'Install actionlint'
+        uses: 'abcxyz/actions/.github/actions/setup-binary@b8fac9cc23485b560411c3a15760e0f4d248b5b3' # ratchet:abcxyz/actions/.github/actions/setup-binary@main
+        with:
+          download_url: 'https://github.com/rhysd/actionlint/releases/download/v${{ env.ACTIONLINT_VERSION }}/actionlint_${{ env.ACTIONLINT_VERSION }}_linux_amd64.tar.gz'
+          install_path: '${{ runner.temp }}/actionlint'
+          binary_subpath: 'actionlint'
+          checksum: 'sha256:${{ env.ACTIONLINT_SHA256 }}'
+          add_to_path: true
+      - name: 'Run actionlint'
+        shell: 'bash'
+        run: 'actionlint -color .github/workflows/*.y*ml'
