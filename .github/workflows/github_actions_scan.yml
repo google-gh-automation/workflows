@@ -7,6 +7,10 @@ on:
         type: 'string'
       zizmor_result_bucket:
         type: 'string'
+      zizmor_config_bucket:
+        type: 'string'
+      zizmor_enforce:
+        type: 'string'
   pull_request_target:
 
 permissions: {}
@@ -14,8 +18,12 @@ permissions: {}
 env:
   ZIZMOR_VERSION: '1.25.2'
   ZIZMOR_DOCKER_DIGEST: 'sha256:14ea7f5cc7c67933394a35b5a38a277397818d232602635edb2010b313afb110'
-  ZIZMOR_ENFORCE: 'false'
-  ZIZMOR_RESULT_BUCKET: 'zizmor-7165'
+  ZIZMOR_ENFORCE: >-
+    ${{ inputs.zizmor_enforce != '' && inputs.zizmor_enforce || 'false' }}
+  ZIZMOR_RESULT_BUCKET: >-
+    ${{ inputs.zizmor_result_bucket != '' && inputs.zizmor_result_bucket || 'zizmor-7165' }}
+  ZIZMOR_CONFIG_BUCKET: >-
+    ${{ inputs.zizmor_config_bucket != '' && inputs.zizmor_config_bucket || 'zizmor-configs-cc63' }}
   WIF_PROVIDER: 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
 
 jobs:
@@ -26,8 +34,12 @@ jobs:
     permissions:
       contents: 'read'
     steps:
+      - name: 'Print Help Link'
+        shell: 'bash'
+        run: |
+          echo "For Googlers: Refer to go/github-zizmor-help for internal guidance on resolving issues."
       - name: 'Checkout source'
-        uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
+        uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' # ratchet:actions/checkout@v6
         with:
           ref: '${{ github.event.pull_request.head.sha }}'
           fetch-depth: 0
@@ -42,8 +54,69 @@ jobs:
           files=$(git diff --name-only --diff-filter=d "${GIT_BASE_SHA}" "${GIT_HEAD_SHA}" | grep -E '^\.github/workflows/.+\.ya?ml$' | xargs || true)
           echo "files=$files" >> "$GITHUB_OUTPUT"
 
-  zizmor-scan:
+  zizmor-config:
     needs: ['check-changes']
+    runs-on: 'ubuntu-latest'
+    if: >-
+      needs.check-changes.outputs.files != ''
+    permissions:
+      id-token: 'write'
+    outputs:
+      mandatory-checks: '${{ steps.identify-mandatory.outputs.mandatory-checks }}'
+      enforce: '${{ steps.identify-enforcement.outputs.enforce }}'
+    steps:
+      - name: 'Authenticate to GCP'
+        uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
+        with:
+          workload_identity_provider: >-
+            ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
+      - name: 'Download zizmor config'
+        shell: 'bash'
+        env:
+          REPO_PATH: '${{ github.repository }}'
+          ORG_PATH: '${{ github.repository_owner }}'
+        run: |
+          if [ -z "${ZIZMOR_CONFIG_BUCKET}" ]; then
+            echo "::error::No config bucket configured. Config bucket is required."
+            exit 1
+          fi
+
+          if gcloud storage cp "gs://${ZIZMOR_CONFIG_BUCKET}/${REPO_PATH}.yaml" zizmor-config.yaml &>/dev/null; then
+            echo "Using repository config: gs://${ZIZMOR_CONFIG_BUCKET}/${REPO_PATH}.yaml"
+          elif gcloud storage cp "gs://${ZIZMOR_CONFIG_BUCKET}/${ORG_PATH}.yaml" zizmor-config.yaml &>/dev/null; then
+            echo "Using organization config: gs://${ZIZMOR_CONFIG_BUCKET}/${ORG_PATH}.yaml"
+          else
+            echo "Attempting to fetch default config: gs://${ZIZMOR_CONFIG_BUCKET}/default.yaml"
+            if ! gcloud storage cp "gs://${ZIZMOR_CONFIG_BUCKET}/default.yaml" zizmor-config.yaml; then
+              echo "::error::Failed to download default config. Crucial step failed."
+              exit 1
+            fi
+          fi
+      - name: 'Identify mandatory checks'
+        id: 'identify-mandatory'
+        shell: 'bash'
+        run: |
+          MANDATORY_LIST=$(yq eval '[.rules | to_entries | .[] | select(.value.remap.severity == "mandatory" and .value.disable != true) | .key]' -o json zizmor-config.yaml)
+          echo "mandatory-checks=${MANDATORY_LIST}" >> "$GITHUB_OUTPUT"
+      - name: 'Identify enforcement status checks'
+        id: 'identify-enforcement'
+        shell: 'bash'
+        run: |
+          echo "enforce=${ZIZMOR_ENFORCE}" >> "$GITHUB_OUTPUT"
+      - name: 'Rewrite mandatory to high in config'
+        shell: 'bash'
+        run: |
+          yq '(.rules.[] | select(.remap.severity == "mandatory") | .remap.severity) = "high"' -i zizmor-config.yaml
+      - name: 'Save config'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        with:
+          name: 'zizmor-config'
+          path: 'zizmor-config.yaml'
+          if-no-files-found: 'error'
+          retention-days: 1
+
+  zizmor-scan:
+    needs: ['check-changes', 'zizmor-config']
     runs-on: 'ubuntu-latest'
     if: >-
       needs.check-changes.outputs.files != '' &&
@@ -56,32 +129,39 @@ jobs:
       )
     permissions:
       contents: 'read'
-    outputs:
-      has-high-severity: '${{ steps.check-findings-severity.outputs.has-high-severity }}'
-      zizmor-enforce: '${{ steps.check-findings-severity.outputs.zizmor-enforce }}'
     steps:
       - name: 'Checkout source'
-        uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
+        uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' # ratchet:actions/checkout@v6
         with:
           ref: '${{ github.event.pull_request.head.sha }}'
           persist-credentials: false
+      - name: 'Download config'
+        uses: 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' # ratchet:actions/download-artifact@v8
+        with:
+          name: 'zizmor-config'
       - name: 'Run zizmor'
         shell: 'bash'
         env:
           GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
           CHANGED_FILES: '${{ needs.check-changes.outputs.files }}'
-        run: >-
-          docker run
-          --rm
-          --volume "${GITHUB_WORKSPACE}:/workspace:ro"
-          --workdir "/workspace"
-          --env GH_TOKEN="${GH_TOKEN}"
-          "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
-          --format sarif
-          --no-ignores
-          --
-          ${CHANGED_FILES}
-          > zizmor.sarif.json
+        run: |
+          read -r -a FILES_ARR <<< "${CHANGED_FILES}"
+          for i in "${!FILES_ARR[@]}"; do
+            [ -n "${FILES_ARR[i]}" ] || unset "FILES_ARR[i]"
+          done
+
+          docker run \
+            --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir "/workspace" \
+            --env GH_TOKEN="${GH_TOKEN}" \
+            "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
+            --config /workspace/zizmor-config.yaml \
+            --format sarif \
+            --no-ignores \
+            -- \
+            "${FILES_ARR[@]}" \
+            > zizmor.sarif.json
       - name: 'Enrich SARIF with GitHub metadata'
         shell: 'bash'
         run: >-
@@ -118,19 +198,11 @@ jobs:
           path: 'enriched.sarif.json'
           if-no-files-found: 'error'
           retention-days: 1
-      - name: 'Check for high severity findings'
-        id: 'check-findings-severity'
-        shell: 'bash'
-        run: |
-          result=$(jq 'any(.runs[].results[]?; .properties["zizmor/severity"] == "High")' zizmor.sarif.json)
-          echo "has-high-severity=$result" >> "$GITHUB_OUTPUT"
-          echo "zizmor-enforce=${ZIZMOR_ENFORCE}" >> "$GITHUB_OUTPUT"
 
   zizmor-upload:
     needs: ['zizmor-scan']
     runs-on: 'ubuntu-latest'
     permissions:
-      contents: 'read'
       id-token: 'write'
     steps:
       - name: 'Retrieve result'
@@ -146,39 +218,103 @@ jobs:
         shell: 'bash'
         env:
           GITHUB_PULL_REQUEST_NUMBER: '${{ github.event.pull_request.number }}'
-          ZIZMOR_RESULT_BUCKET: >-
-            ${{ inputs.zizmor_result_bucket != '' && inputs.zizmor_result_bucket || env.ZIZMOR_RESULT_BUCKET }}
         run: >-
           gcloud storage cp
           enriched.sarif.json
           "gs://${ZIZMOR_RESULT_BUCKET}/${GITHUB_REPOSITORY}/${GITHUB_PULL_REQUEST_NUMBER}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.sarif.json"
 
   zizmor-output:
-    needs: ['zizmor-scan']
+    needs: ['check-changes', 'zizmor-scan', 'zizmor-config']
     runs-on: 'ubuntu-latest'
     permissions:
       contents: 'read'
     if: >-
-      needs.zizmor-scan.outputs.zizmor-enforce == 'true' &&
-      needs.zizmor-scan.outputs.has-high-severity == 'true'
+      needs.zizmor-config.outputs.enforce == 'true'
     steps:
       - name: 'Checkout source'
-        uses: 'actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd' # ratchet:actions/checkout@v6
+        uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' # ratchet:actions/checkout@v6
         with:
           ref: '${{ github.event.pull_request.head.sha }}'
           persist-credentials: false
+      - name: 'Download config'
+        uses: 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' # ratchet:actions/download-artifact@v8
+        with:
+          name: 'zizmor-config'
+      - name: 'Retrieve result'
+        uses: 'actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c' # ratchet:actions/download-artifact@v8
+        with:
+          name: 'zizmor'
       - name: 'Re-run zizmor with github format'
+        id: 'run-zizmor'
         shell: 'bash'
         env:
           GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
           CHANGED_FILES: '${{ needs.check-changes.outputs.files }}'
-        run: >-
-          docker run
-          --rm
-          --volume "${GITHUB_WORKSPACE}:/workspace:ro"
-          --workdir "/workspace"
-          --env GH_TOKEN="${GH_TOKEN}"
-          "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}"
-          --format github
-          --
-          ${CHANGED_FILES}
+        run: |
+          set +e
+          read -r -a FILES_ARR <<< "${CHANGED_FILES}"
+          for i in "${!FILES_ARR[@]}"; do
+            [ -n "${FILES_ARR[i]}" ] || unset "FILES_ARR[i]"
+          done
+
+          docker run \
+            --rm \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir "/workspace" \
+            --env GH_TOKEN="${GH_TOKEN}" \
+            "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
+            --config /workspace/zizmor-config.yaml \
+            --format github \
+            --min-confidence medium \
+            -- \
+            "${FILES_ARR[@]}"
+          ZIZMOR_EXIT_CODE=$?
+          set -e
+          echo "exit-code=$ZIZMOR_EXIT_CODE" >> "$GITHUB_OUTPUT"
+      - name: 'Evaluate mandatory checks'
+        if: 'always()'
+        shell: 'bash'
+        env:
+          MANDATORY_CHECKS: '${{ needs.zizmor-config.outputs.mandatory-checks }}'
+          ZIZMOR_EXIT_CODE: '${{ steps.run-zizmor.outputs.exit-code }}'
+        run: |
+          trap 'if [ "$?" -ne 0 ]; then echo "For Googlers: Refer to go/github-zizmor-help for internal guidance on resolving issues."; fi' EXIT
+          echo "Mandatory checks to evaluate: ${MANDATORY_CHECKS}"
+          echo "Zizmor format github exit code: ${ZIZMOR_EXIT_CODE}"
+
+          HAS_MANDATORY_FINDINGS="false"
+          if [ -n "${MANDATORY_CHECKS}" ] && [ "${MANDATORY_CHECKS}" != "[]" ]; then
+            FINDINGS=$(jq --argjson checks "${MANDATORY_CHECKS}" '
+              [.runs[]?.results[]? | select(.ruleId | split("/") | last as $rule | $checks | index($rule))]
+            ' enriched.sarif.json)
+            NUM_FINDINGS=$(echo "${FINDINGS}" | jq 'length')
+            if [ "${NUM_FINDINGS}" -gt 0 ]; then
+              echo "::error::Found ${NUM_FINDINGS} findings for mandatory checks that must always succeed."
+              echo "${FINDINGS}" | jq -r '
+                .[] 
+                | "::error file=\(.locations[0].logicalLocations[0]?.properties?.symbolic?.key?.Local?.given_path // .locations[0].physicalLocation.artifactLocation.uri),line=\(.locations[0].physicalLocation.region.startLine),title=\(.ruleId)::\(.message.text)"
+              '
+              echo "========================================="
+              echo "CRITICAL: The following mandatory checks failed:"
+              echo "${FINDINGS}" | jq -r '
+                .[] | "- \(.ruleId) at line \(.locations[0].physicalLocation.region.startLine) of \(.locations[0].physicalLocation.artifactLocation.uri): \(.message.text)"
+              '
+              echo "========================================="
+              HAS_MANDATORY_FINDINGS="true"
+            fi
+          fi
+
+          # Exit codes 11 and 12 are for Informational and Low findings, respectively.
+          # Exit codes 13 and 14 represent Medium and High findings.
+          # Fail if the exit code is greater than 12 (i.e. 13 for Medium, 14 for High).
+          if [ "${ZIZMOR_EXIT_CODE}" -gt 12 ]; then
+            echo "Failing due to zizmor finding severity of Medium/High (exit code: ${ZIZMOR_EXIT_CODE})."
+            exit 1
+          fi
+
+          if [ "${HAS_MANDATORY_FINDINGS}" = "true" ]; then
+            echo "Failing due to failed mandatory checks."
+            exit 1
+          fi
+
+          echo "All checks evaluated successfully. No mandatory or medium/high findings."
