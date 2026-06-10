@@ -39,7 +39,7 @@ jobs:
           GIT_HEAD_SHA: '${{ github.event.pull_request.head.sha }}'
           GIT_BASE_SHA: '${{ github.event.pull_request.base.sha }}'
         run: |
-          files=$(git diff --name-only --diff-filter=d "${GIT_BASE_SHA}" "${GIT_HEAD_SHA}" | grep -E '^\.github/workflows/.+\.ya?ml$' | xargs || true)
+          files=$(git diff --name-only --diff-filter=d "${GIT_BASE_SHA}" "${GIT_HEAD_SHA}" | grep -E '^\.github/(workflows/.+\.ya?ml|dependabot\.ya?ml)$' | xargs || true)
           echo "files=$files" >> "$GITHUB_OUTPUT"
 
   zizmor-scan:
