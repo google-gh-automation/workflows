@@ -96,7 +96,7 @@ jobs:
         id: 'identify-mandatory'
         shell: 'bash'
         run: |
-          MANDATORY_LIST=$(yq eval '[.rules | to_entries | .[] | select(.value.remap.severity == "mandatory" and .value.disable != true) | .key]' -o json zizmor-config.yaml)
+          MANDATORY_LIST=$(yq eval '[.rules | to_entries | .[] | select(.value.remap.severity == "mandatory" and .value.disable != true) | .key]' -o json --indent 0 zizmor-config.yaml)
           echo "mandatory-checks=${MANDATORY_LIST}" >> "$GITHUB_OUTPUT"
       - name: 'Identify enforcement status checks'
         id: 'identify-enforcement'
