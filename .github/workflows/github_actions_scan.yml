@@ -265,7 +265,6 @@ jobs:
             "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
             --config /workspace/zizmor-config.yaml \
             --format github \
-            --min-confidence medium \
             -- \
             "${FILES_ARR[@]}"
           ZIZMOR_EXIT_CODE=$?
