@@ -1,5 +1,6 @@
 name: 'GitHub Actions Scan'
 
+# zizmor: ignore[dangerous-triggers] Required to have `id-token: write` for GCP auth.
 on:
   workflow_call:
     inputs:
