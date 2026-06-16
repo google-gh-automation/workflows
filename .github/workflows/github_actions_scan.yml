@@ -265,7 +265,6 @@ jobs:
             "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
             --config /workspace/zizmor-config.yaml \
             --format github \
-            --min-confidence medium \
             -- \
             "${FILES_ARR[@]}"
           ZIZMOR_EXIT_CODE=$?
@@ -278,7 +277,7 @@ jobs:
           MANDATORY_CHECKS: '${{ needs.zizmor-config.outputs.mandatory-checks }}'
           ZIZMOR_EXIT_CODE: '${{ steps.run-zizmor.outputs.exit-code }}'
         run: |
-          trap 'if [ "$?" -ne 0 ]; then echo "For Googlers: Refer to go/github-zizmor-help for internal guidance on resolving issues."; fi' EXIT
+          trap 'if [ "$?" -ne 0 ]; then echo ""; echo "For Googlers: Refer to go/github-zizmor-help for internal guidance on resolving issues."; fi' EXIT
           echo "Mandatory checks to evaluate: ${MANDATORY_CHECKS}"
           echo "Zizmor format github exit code: ${ZIZMOR_EXIT_CODE}"
 
@@ -309,11 +308,14 @@ jobs:
           # Fail if the exit code is greater than 12 (i.e. 13 for Medium, 14 for High).
           if [ "${ZIZMOR_EXIT_CODE}" -gt 12 ]; then
             echo "Failing due to zizmor finding severity of Medium/High (exit code: ${ZIZMOR_EXIT_CODE})."
+            echo ""
+            echo "See https://docs.zizmor.sh/audits/ for more info about these checks."
+            echo "See https://docs.zizmor.sh/usage/#ignoring-results for ignoring checks that are false positive."
             exit 1
           fi
 
           if [ "${HAS_MANDATORY_FINDINGS}" = "true" ]; then
-            echo "Failing due to failed mandatory checks."
+            echo "Blocking due to failed mandatory checks. These checks cannot be ignored."
             exit 1
           fi
 
