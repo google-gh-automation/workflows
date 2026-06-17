@@ -130,6 +130,8 @@ jobs:
       )
     permissions:
       contents: 'read'
+    outputs:
+      offline: '${{ steps.run-zizmor.outputs.offline }}'
     steps:
       - name: 'Checkout source'
         uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' # ratchet:actions/checkout@v6
@@ -141,6 +143,7 @@ jobs:
         with:
           name: 'zizmor-config'
       - name: 'Run zizmor'
+        id: 'run-zizmor'
         shell: 'bash'
         env:
           GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
@@ -151,6 +154,7 @@ jobs:
             [ -n "${FILES_ARR[i]}" ] || unset "FILES_ARR[i]"
           done
 
+          set +e
           docker run \
             --rm \
             --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
@@ -162,9 +166,38 @@ jobs:
             --no-ignores \
             -- \
             "${FILES_ARR[@]}" \
-            > zizmor.sarif.json
+            > zizmor.sarif.json 2> zizmor.err
+          EXIT_CODE=$?
+          set -e
+
+          OFFLINE_MODE="false"
+          if [ $EXIT_CODE -ne 0 ]; then
+            if grep -q "missing or you have no access" zizmor.err; then
+              echo "::warning::Zizmor token has insufficient permissions. Falling back to offline scan."
+              docker run \
+                --rm \
+                --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+                --workdir "/workspace" \
+                "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
+                --config /workspace/zizmor-config.yaml \
+                --format sarif \
+                --no-ignores \
+                -- \
+                "${FILES_ARR[@]}" \
+                > zizmor.sarif.json
+              OFFLINE_MODE="true"
+            else
+              echo "Zizmor scan failed with error:" >&2
+              cat zizmor.err >&2
+              exit $EXIT_CODE
+            fi
+          fi
+
+          echo "offline=${OFFLINE_MODE}" >> "$GITHUB_OUTPUT"
       - name: 'Enrich SARIF with GitHub metadata'
         shell: 'bash'
+        env:
+          OFFLINE_MODE: '${{ steps.run-zizmor.outputs.offline }}'
         run: >-
           jq
           --arg uri "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
@@ -172,6 +205,7 @@ jobs:
           --argjson repo_id "${GITHUB_REPOSITORY_ID}"
           --argjson owner_id "${GITHUB_REPOSITORY_OWNER_ID}"
           --arg run_id "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+          --argjson offline "${OFFLINE_MODE:-false}"
           '.runs[] |= . + {
             "versionControlProvenance": [
               {
@@ -187,7 +221,8 @@ jobs:
               {
                 "executionSuccessful": true,
                 "properties": {
-                  "execution_id": $run_id
+                  "execution_id": $run_id,
+                  "offline": $offline
                 }
               }
             ]
@@ -251,6 +286,7 @@ jobs:
         env:
           GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
           CHANGED_FILES: '${{ needs.check-changes.outputs.files }}'
+          OFFLINE_MODE: '${{ needs.zizmor-scan.outputs.offline }}'
         run: |
           set +e
           read -r -a FILES_ARR <<< "${CHANGED_FILES}"
@@ -258,16 +294,31 @@ jobs:
             [ -n "${FILES_ARR[i]}" ] || unset "FILES_ARR[i]"
           done
 
-          docker run \
-            --rm \
-            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
-            --workdir "/workspace" \
-            --env GH_TOKEN="${GH_TOKEN}" \
-            "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
-            --config /workspace/zizmor-config.yaml \
-            --format github \
-            -- \
-            "${FILES_ARR[@]}"
+          if [ "${OFFLINE_MODE}" = "true" ]; then
+            echo "Running zizmor offline because the initial scan was offline."
+            docker run \
+              --rm \
+              --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+              --workdir "/workspace" \
+              "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
+              --config /workspace/zizmor-config.yaml \
+              --format github \
+              --min-confidence medium \
+              -- \
+              "${FILES_ARR[@]}"
+          else
+            docker run \
+              --rm \
+              --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+              --workdir "/workspace" \
+              --env GH_TOKEN="${GH_TOKEN}" \
+              "ghcr.io/zizmorcore/zizmor:${ZIZMOR_VERSION}@${ZIZMOR_DOCKER_DIGEST}" \
+              --config /workspace/zizmor-config.yaml \
+              --format github \
+              --min-confidence medium \
+              -- \
+              "${FILES_ARR[@]}"
+          fi
           ZIZMOR_EXIT_CODE=$?
           set -e
           echo "exit-code=$ZIZMOR_EXIT_CODE" >> "$GITHUB_OUTPUT"
