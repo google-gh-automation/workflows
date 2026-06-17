@@ -68,7 +68,9 @@ jobs:
     steps:
       - name: 'Authenticate to GCP'
         uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
+        id: 'gcp-auth'
         with:
+          token_format: 'access_token'
           workload_identity_provider: >-
             ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
       - name: 'Download zizmor config'
@@ -76,19 +78,30 @@ jobs:
         env:
           REPO_PATH: '${{ github.repository }}'
           ORG_PATH: '${{ github.repository_owner }}'
+          GOOGLE_ACCESS_TOKEN: '${{ steps.gcp-auth.outputs.access_token }}'
         run: |
           if [ -z "${ZIZMOR_CONFIG_BUCKET}" ]; then
             echo "::error::No config bucket configured. Config bucket is required."
             exit 1
           fi
 
-          if gcloud storage cp "gs://${ZIZMOR_CONFIG_BUCKET}/${REPO_PATH}.yaml" zizmor-config.yaml &>/dev/null; then
-            echo "Using repository config: gs://${ZIZMOR_CONFIG_BUCKET}/${REPO_PATH}.yaml"
-          elif gcloud storage cp "gs://${ZIZMOR_CONFIG_BUCKET}/${ORG_PATH}.yaml" zizmor-config.yaml &>/dev/null; then
-            echo "Using organization config: gs://${ZIZMOR_CONFIG_BUCKET}/${ORG_PATH}.yaml"
+          gcs_download() {
+            local src_path="$1"
+            local dst_path="$2"
+
+            curl -f -sS -L \
+              -H "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+              -o "$dst_path" \
+              "https://storage.googleapis.com/${src_path}"
+          }
+
+          if gcs_download "${ZIZMOR_CONFIG_BUCKET}/${REPO_PATH}.yaml" zizmor-config.yaml &>/dev/null; then
+            echo "Using repository config: ${ZIZMOR_CONFIG_BUCKET}/${REPO_PATH}.yaml"
+          elif gcs_download "${ZIZMOR_CONFIG_BUCKET}/${ORG_PATH}.yaml" zizmor-config.yaml &>/dev/null; then
+            echo "Using organization config: ${ZIZMOR_CONFIG_BUCKET}/${ORG_PATH}.yaml"
           else
-            echo "Attempting to fetch default config: gs://${ZIZMOR_CONFIG_BUCKET}/default.yaml"
-            if ! gcloud storage cp "gs://${ZIZMOR_CONFIG_BUCKET}/default.yaml" zizmor-config.yaml; then
+            echo "Attempting to fetch default config: ${ZIZMOR_CONFIG_BUCKET}/default.yaml"
+            if ! gcs_download "${ZIZMOR_CONFIG_BUCKET}/default.yaml" zizmor-config.yaml; then
               echo "::error::Failed to download default config. Crucial step failed."
               exit 1
             fi
@@ -246,18 +259,31 @@ jobs:
         with:
           name: 'zizmor'
       - name: 'Authenticate to GCP'
+        id: 'gcp-auth'
         uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
         with:
+          token_format: 'access_token'
           workload_identity_provider: >-
             ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
       - name: 'Upload result'
         shell: 'bash'
         env:
           GITHUB_PULL_REQUEST_NUMBER: '${{ github.event.pull_request.number }}'
-        run: >-
-          gcloud storage cp
-          enriched.sarif.json
-          "gs://${ZIZMOR_RESULT_BUCKET}/${GITHUB_REPOSITORY}/${GITHUB_PULL_REQUEST_NUMBER}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.sarif.json"
+          GOOGLE_ACCESS_TOKEN: '${{ steps.gcp-auth.outputs.access_token }}'
+        run: |
+          gcs_upload() {
+            local src_path="$1"
+            local dst_path="$2"
+
+            curl -f -sS -L \
+              -T "$src_path" \
+              -H "Authorization: Bearer ${GOOGLE_ACCESS_TOKEN}" \
+              "https://storage.googleapis.com/${dst_path}"
+          }
+
+          gcs_upload \
+          enriched.sarif.json \
+          "${ZIZMOR_RESULT_BUCKET}/${GITHUB_REPOSITORY}/${GITHUB_PULL_REQUEST_NUMBER}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}.sarif.json"
 
   zizmor-output:
     needs: ['check-changes', 'zizmor-scan', 'zizmor-config']
