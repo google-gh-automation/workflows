@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test-zizmor-scan:
-    uses: 'google-gh-automation/workflows/.github/workflows/github_actions_scan.yml@main'
+    uses: './.github/workflows/github_actions_scan.yml'
     with:
       wif_provider: 'projects/763312321262/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
       zizmor_result_bucket: 'zizmor-43e4'
