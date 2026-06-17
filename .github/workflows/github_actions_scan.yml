@@ -25,7 +25,8 @@ env:
     ${{ inputs.zizmor_result_bucket != '' && inputs.zizmor_result_bucket || 'zizmor-7165' }}
   ZIZMOR_CONFIG_BUCKET: >-
     ${{ inputs.zizmor_config_bucket != '' && inputs.zizmor_config_bucket || 'zizmor-configs-cc63' }}
-  WIF_PROVIDER: 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
+  WIF_PROVIDER: >-
+    ${{ inputs.wif_provider != '' && inputs.wif_provider || 'projects/102295818544/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider' }}
 
 jobs:
   check-changes:
@@ -70,15 +71,13 @@ jobs:
         uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
         id: 'gcp-auth'
         with:
-          token_format: 'access_token'
-          workload_identity_provider: >-
-            ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
+          workload_identity_provider: '${{ env.WIF_PROVIDER }}'
       - name: 'Download zizmor config'
         shell: 'bash'
         env:
           REPO_PATH: '${{ github.repository }}'
           ORG_PATH: '${{ github.repository_owner }}'
-          GOOGLE_ACCESS_TOKEN: '${{ steps.gcp-auth.outputs.access_token }}'
+          GOOGLE_ACCESS_TOKEN: '${{ steps.gcp-auth.outputs.auth_token }}'
         run: |
           if [ -z "${ZIZMOR_CONFIG_BUCKET}" ]; then
             echo "::error::No config bucket configured. Config bucket is required."
@@ -262,14 +261,12 @@ jobs:
         id: 'gcp-auth'
         uses: 'google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed' # ratchet:google-github-actions/auth@v2
         with:
-          token_format: 'access_token'
-          workload_identity_provider: >-
-            ${{ inputs.wif_provider != '' && inputs.wif_provider || env.WIF_PROVIDER }}
+          workload_identity_provider: '${{ env.WIF_PROVIDER }}'
       - name: 'Upload result'
         shell: 'bash'
         env:
           GITHUB_PULL_REQUEST_NUMBER: '${{ github.event.pull_request.number }}'
-          GOOGLE_ACCESS_TOKEN: '${{ steps.gcp-auth.outputs.access_token }}'
+          GOOGLE_ACCESS_TOKEN: '${{ steps.gcp-auth.outputs.auth_token }}'
         run: |
           gcs_upload() {
             local src_path="$1"
