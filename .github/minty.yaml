@@ -1,0 +1,18 @@
+version: 'minty.abcxyz.dev/v2'
+
+rule:
+  if: |-
+    assertion.iss == issuers.github &&
+    assertion.repository_owner_id == '198259824' &&
+    assertion.repository_id == '1238099503'
+
+scope:
+  create-tag:
+    rule:
+      if: |-
+        assertion.ref == 'refs/heads/main' &&
+        assertion.event_name == 'workflow_dispatch'
+    repositories:
+      - 'workflows'
+    permissions:
+      contents: 'write'
