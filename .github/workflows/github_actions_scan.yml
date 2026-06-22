@@ -115,7 +115,17 @@ jobs:
         id: 'identify-enforcement'
         shell: 'bash'
         run: |
-          echo "enforce=${ZIZMOR_ENFORCE}" >> "$GITHUB_OUTPUT"
+          FINAL_ENFORCE="${ZIZMOR_ENFORCE}"
+          CONFIG_ENFORCE="$(yq eval '.google.enforce' zizmor-config.yaml)"
+          if [[ "${CONFIG_ENFORCE}" = "true" || "${CONFIG_ENFORCE}" = "false" ]]; then
+            echo "Using enforcment value from config: ${CONFIG_ENFORCE}"
+            FINAL_ENFORCE="${CONFIG_ENFORCE}"
+          fi
+          echo "enforce=${FINAL_ENFORCE}" >> "$GITHUB_OUTPUT"
+      - name: 'Remove non-standard google key'
+        shell: 'bash'
+        run: |
+          yq 'del(.google)' -i zizmor-config.yaml
       - name: 'Rewrite mandatory to high in config'
         shell: 'bash'
         run: |
