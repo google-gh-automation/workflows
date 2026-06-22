@@ -85,3 +85,5 @@ jobs:
             } catch (err) {
               core.setFailed(`Failed to create tag ${tagName}: ${err.message}`);
             }
+
+# test
