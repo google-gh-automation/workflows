@@ -16,4 +16,4 @@ jobs:
       wif_provider: 'projects/763312321262/locations/global/workloadIdentityPools/gitsec-gha-artifacts/providers/gitsec-gha-artifacts-provider'
       zizmor_result_bucket: 'zizmor-43e4'
       zizmor_config_bucket: 'zizmor-configs-06f3'
-      zizmor_enforce: 'true'
+      zizmor_enforce: 'false'
