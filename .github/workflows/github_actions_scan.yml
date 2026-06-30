@@ -13,6 +13,7 @@ on:
         type: 'string'
   # zizmor: ignore[dangerous-triggers] Required to have `id-token: write` for GCP auth.
   pull_request_target:
+  merge_group:
 
 permissions: {}
 
