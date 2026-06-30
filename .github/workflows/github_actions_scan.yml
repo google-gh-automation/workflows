@@ -32,6 +32,7 @@ env:
 jobs:
   check-changes:
     runs-on: 'ubuntu-latest'
+    if: github.event_name != 'merge_group'
     outputs:
       files: '${{ steps.check.outputs.files }}'
     permissions:
