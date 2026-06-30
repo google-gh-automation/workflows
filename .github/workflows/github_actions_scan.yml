@@ -13,6 +13,7 @@ on:
         type: 'string'
   # zizmor: ignore[dangerous-triggers] Required to have `id-token: write` for GCP auth.
   pull_request_target:
+  merge_group:
 
 permissions: {}
 
@@ -31,6 +32,7 @@ env:
 jobs:
   check-changes:
     runs-on: 'ubuntu-latest'
+    if: github.event_name != 'merge_group'
     outputs:
       files: '${{ steps.check.outputs.files }}'
     permissions:
