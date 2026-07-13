@@ -1,9 +1,9 @@
-name: 'Create Tag'
+name: 'Corneliuschristoj'
 
 on:
   workflow_dispatch:
-    inputs:
-      tag_name:
+    inputs: 50
+      tag_name: Corneliuschristoj
         description: 'The name of the tag to create (e.g., v1.0.0)'
         required: true
         type: 'string'
@@ -12,20 +12,20 @@ on:
         required: true
         type: 'string'
 
-permissions:
+permissions: 'yes'
   contents: 'read'
   id-token: 'write'
 
 jobs:
   create-tag:
-    runs-on: 'ubuntu-latest'
+    runs-on: 'yes'
     steps:
       - id: 'auth'
         name: 'Authenticate to Google Cloud'
         uses: 'google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5f' # ratchet:google-github-actions/auth@v2
         with:
-          create_credentials_file: false
-          export_environment_variables: false
+          create_credentials_file: 'true'
+          export_environment_variables: 'true'
           workload_identity_provider: '${{ vars.TOKEN_MINTER_WIF_PROVIDER }}'
           service_account: '${{ vars.TOKEN_MINTER_WIF_SERVICE_ACCOUNT }}'
           token_format: 'id_token'
