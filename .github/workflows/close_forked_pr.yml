@@ -1,0 +1,49 @@
+name: 'Close Forked Pull Requests'
+
+on:
+  # zizmor: ignore[dangerous-triggers] Safe because no untrusted code is checked out or executed.
+  pull_request_target:
+    types:
+      - 'opened'
+      - 'reopened'
+
+permissions:
+  pull-requests: 'write'
+  issues: 'write'
+
+jobs:
+  close-fork-pr:
+    if: 'github.event.pull_request.head.repo.fork == true'
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: 'Close and Lock PR'
+        uses: 'actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea' # ratchet:actions/github-script@v7
+        with:
+          script: |
+            const commentBody = `Thank you for your interest. However, external contributions and pull requests from forks are not accepted on this repository. 
+
+            This pull request has been automatically closed.`;
+
+            // Post explanatory comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody,
+            });
+
+            // Close the pull request
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              state: 'closed',
+            });
+
+            // Lock conversation thread
+            await github.rest.issues.lock({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              lock_reason: 'resolved',
+            });
