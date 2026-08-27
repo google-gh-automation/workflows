@@ -40,11 +40,15 @@ jobs:
         shell: 'bash'
         run: |
           echo "For Googlers: Refer to go/github-zizmor-help for internal guidance on resolving issues."
+      - name: 'Calculate fetch depth'
+        shell: 'bash'
+        run: |
+          echo "FETCH_DEPTH=$(( ${{ github.event.pull_request.commits || 1 }} + 2 ))" >> "$GITHUB_ENV"
       - name: 'Checkout source'
         uses: 'actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10' # ratchet:actions/checkout@v6
         with:
           ref: '${{ github.event.pull_request.head.sha }}'
-          fetch-depth: 0
+          fetch-depth: '${{ env.FETCH_DEPTH }}'
           persist-credentials: false
       - name: 'Check for workflow changes'
         id: 'check'
@@ -53,6 +57,7 @@ jobs:
           GIT_HEAD_SHA: '${{ github.event.pull_request.head.sha }}'
           GIT_BASE_SHA: '${{ github.event.pull_request.base.sha }}'
         run: |
+          git fetch origin "${GIT_BASE_SHA}"
           files=$(git diff --name-only --diff-filter=d "${GIT_BASE_SHA}" "${GIT_HEAD_SHA}" | grep -E '^\.github/(workflows/.+\.ya?ml|dependabot\.ya?ml)$' | xargs || true)
           echo "files=$files" >> "$GITHUB_OUTPUT"
 
