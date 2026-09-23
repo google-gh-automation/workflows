@@ -1,0 +1,35 @@
+name: 'Enforce Promotion Source'
+
+on:
+  # zizmor: ignore[dangerous-triggers] Safe because no untrusted code is checked out or executed and no permissions are granted.
+  pull_request_target:
+    branches:
+      - 'main'
+
+permissions: {}
+
+jobs:
+  enforce-promotion-source:
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: 'Require staging as the head branch'
+        shell: 'bash'
+        env:
+          HEAD_REF: '${{ github.head_ref }}'
+          HEAD_REPO: '${{ github.event.pull_request.head.repo.full_name }}'
+          BASE_REPO: '${{ github.repository }}'
+        run: |
+          # A fork can contain a branch that is also called "staging", so the
+          # head repository must be verified before the branch name is trusted.
+          if [[ "${HEAD_REPO}" != "${BASE_REPO}" ]]; then
+            echo "::error::Pull requests into 'main' must originate from the 'staging' branch of '${BASE_REPO}', but this pull request originates from the fork '${HEAD_REPO}'."
+            exit 1
+          fi
+
+          if [[ "${HEAD_REF}" != "staging" ]]; then
+            echo "::error::Pull requests into 'main' must be promotions from the 'staging' branch, but this pull request originates from '${HEAD_REF}'."
+            echo "Open your pull request against 'staging' instead. Once it has soaked there, promote 'staging' into 'main'."
+            exit 1
+          fi
+
+          echo "Head branch is 'staging'; this is a valid promotion."
